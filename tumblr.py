@@ -61,6 +61,7 @@ headers = {
 
 ss = requests.session()
 ss.headers.update(headers)
+gif = False
 proxies = { "http": "http://127.0.0.1:8085", "https": "http://127.0.0.1:8085", }
 
 class Error(Exception):
@@ -154,7 +155,7 @@ def download_run(item):
         return finished, filename
     r = requests.get(url, stream = True, verify = False, headers = headers,proxies=proxies)
     if total > 0:
-        print "[+] Size: %dKB" % (total / 1024)
+        print "\n[+] Size: %dKB" % (total / 1024)
     else:
         print "[+] Size: None"
 
@@ -276,6 +277,10 @@ class TumblrAPI(object):
                             'subdir': 'photos',
                         }
                         index += 1
+                        if gif:
+                            pass
+                        else:
+                            if '.gif' in durl:continue
                         items.append(t)
             return items
 
@@ -530,6 +535,7 @@ class Tumblr(TumblrAPI):
         return do
 
     def parse_urls(self, url):
+        url=url+'.tumblr.com'
         _mod = re.search(r'(http://|https://|)(?P<hostname>.+\.tumblr.com)', url)
         if not _mod:
             print '[Error]:', 'url is illegal.', '\n' + url.decode('utf8', 'ignore')
@@ -602,11 +608,10 @@ def print_msg(check):
                     'NE: ' +  '%s' %(NET_ERRORS.value),
                     'O: %s' % OFFSET.value
                 )
-        print '\n完成下载次数%s\n'%DOWNLOADS.value
         sys.stdout.write(msg)
         sys.stdout.flush()
         time.sleep(2)
-    print 'Exiting'  
+
 
 def sighandler(signum, frame):
     # print s % (1, 91, "\n  !! Signal:"), signum
@@ -687,8 +692,9 @@ def main(argv):
 
     for thr in thrs:
         thr.join()
-
-    msg_thr.terminate()
+    
+    print '任务完成'
+    #msg_thr.terminate()
 
 if __name__ == '__main__':
     argv = sys.argv
