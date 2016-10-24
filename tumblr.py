@@ -46,7 +46,7 @@ wget_es = {
 }
 ############################################################
 
-s = '\x1b[%d;%dm%s\x1b[0m'       # terminual color template
+#s = '\x1b[%d;%dm%s\x1b[0m'       # terminual color template
 
 headers = {
     "Accept":"text/html,application/xhtml+xml,application/xml; " \
@@ -61,6 +61,7 @@ headers = {
 
 ss = requests.session()
 ss.headers.update(headers)
+proxies = { "http": "http://127.0.0.1:8085", "https": "http://127.0.0.1:8085", }
 
 class Error(Exception):
     def __init__(self, msg):
@@ -113,12 +114,13 @@ def remove_downloaded_items(items):
             items.appendleft(item)
 
 def download_run(item):
-    filepath = os.path.join(item['dir_'], item['subdir'], item['filename'])
+    #filepath = os.path.join(item['dir_'], item['subdir'], item['filename'])
     # if os.path.exists(filepath):
         # return None
     # num = random.randint(0, 7) % 8
     # col = s % (1, num + 90, filepath)
     # print '  ++ download: %s' % col
+    '''
     cmd = ' '.join([
         'wget', '-c', '-q', '-T', '10',
         '-O', '"%s.tmp"' % filepath,
@@ -127,6 +129,79 @@ def download_run(item):
     ])
     status = os.system(cmd)
     return status, filepath
+    '''
+    finished = 1
+    start_t = time.time()
+    filename = os.path.join(item['dir_'], item['subdir'], item['filename'])   
+    tmp_filename = filename + '.tmp'
+    url=item['durl']
+    ssize=size=0
+    total = support_continue(url)
+    if total > 512:   
+        try:
+            with open(tmp_filename, 'rb') as fin:
+                ssize = int(fin.read())
+                size = ssize + 1
+        except:
+            with open(tmp_filename, 'w') as fin:
+                pass
+        finally:
+            headers['Range'] = "bytes=%d-" % (ssize, )
+    else:
+        #with open(filename, 'w') as fin:
+                #pass
+        #with open(tmp_filename, 'w') as fin:
+        return finished, filename
+    r = requests.get(url, stream = True, verify = False, headers = headers,proxies=proxies)
+    if total > 0:
+        print "[+] Size: %dKB" % (total / 1024)
+    else:
+        print "[+] Size: None"
+
+    with open(tmp_filename, 'ab+') as f:
+        f.seek(ssize)
+        f.truncate()
+        try:
+            for chunk in r.iter_content(chunk_size = 1024): 
+                if chunk:
+                    f.write(chunk)
+                    size += len(chunk)
+                    f.flush()
+                sys.stdout.write('\b' * 64 + 'Now: %d, Total: %s' % (size, total))
+                sys.stdout.flush()
+            if size==total:
+                finished = 0
+
+            spend = int(time.time() - start_t)
+            speed = int((size - ssize) / 1024 / spend)
+            sys.stdout.write('\nDownload Finished!\nTotal Time: %ss, Download Speed: %sk/s\n' % (spend, speed))
+            sys.stdout.flush()
+            return finished, filename
+        except:
+            # import traceback
+            # print traceback.print_exc()
+            print "\nDownload pause.\n"
+        finally:
+            if finished != 0:
+                with open(tmp_filename, 'wb') as ftmp:
+                    ftmp.write(str(size))
+
+def support_continue(url):
+    headers = {
+        'Range': 'bytes=0-4'
+    }
+    try:
+        r = requests.head(url, headers = headers)
+        crange = r.headers['content-range']
+        stotal = int(re.match(ur'^bytes 0-4/(\d+)$', crange).group(1))
+        return stotal
+    except:
+        pass
+    try:
+        stotal = int(r.headers['content-length'])
+    except:
+        stotal = 0
+    return stotal
 
 def callback(filepath):
     os.rename('%s.tmp' % filepath, filepath)
@@ -167,7 +242,7 @@ class TumblrAPI(object):
         params['api_key'] = API_KEY
         while True:
             try:
-                res = ss.get(api_url, params=params, timeout=10)
+                res = ss.get(api_url, params=params, timeout=10, verify = False, headers = headers,proxies=proxies)
                 json_data = res.json()
                 break
             except KeyboardInterrupt:
@@ -177,7 +252,7 @@ class TumblrAPI(object):
                 # print s % (1, 93, '[Error at requests]:'), e
                 time.sleep(5)
         if json_data['meta']['msg'].lower() != 'ok':
-            raise Error(s % (1, 91, json_data['meta']['msg']))
+            raise Error(json_data['meta']['msg'])
 
         return json_data['response']
 
@@ -286,6 +361,7 @@ class Tumblr(TumblrAPI):
         self.offset = self.args.offset
         self.make_items = self.parse_urls(url)
 
+
     def save_json(self):
         with open(self.json_path, 'w') as g:
             g.write(json.dumps(
@@ -334,8 +410,8 @@ class Tumblr(TumblrAPI):
         if self.args.offset:
             self.offset = self.args.offset
 
-        print s % (1, 92, '## begin:'), 'offset = %s,' % self.offset, base_hostname
-        print s % (1, 97, 'INFO:\n') + \
+        print '## begin:', 'offset = %s,' % self.offset, base_hostname
+        print 'INFO:\n' + \
             'D = Downloads, R = Repair_Need\n' + \
             'C = Completion, NE = Net_Errors, O = Offset'
 
@@ -456,7 +532,7 @@ class Tumblr(TumblrAPI):
     def parse_urls(self, url):
         _mod = re.search(r'(http://|https://|)(?P<hostname>.+\.tumblr.com)', url)
         if not _mod:
-            print s % (1, 91, '[Error]:'), 'url is illegal.', '\n' + url.decode('utf8', 'ignore')
+            print '[Error]:', 'url is illegal.', '\n' + url.decode('utf8', 'ignore')
             return lambda: []
         base_hostname = _mod.group('hostname')
         if self.args.check:
@@ -514,21 +590,23 @@ def args_handler(argv):
 
 def print_msg(check):
     time.sleep(2) # initial interval
-
+    print 'Starting' 
     while True:
         msg = "\r%s, %s, %s, %s, %s " % \
                 (
-                    'D: ' + s % (1, 92, DOWNLOADS.value),
-                    'R: ' + s % (1, 93, UNCOMPLETION.value \
+                    'D: ' +  '%s' %(DOWNLOADS.value),
+                    'R: ' +  '%s' %(UNCOMPLETION.value \
                         if not check \
                         else UNCOMPLETION.value - DOWNLOAD_ERRORS.value - DOWNLOADS.value),
-                    'C: ' + s % (1, 97, COMPLETION.value + DOWNLOADS.value),
-                    'NE: ' + s % (1, 91, NET_ERRORS.value),
+                    'C: ' +  '%s' %(COMPLETION.value + DOWNLOADS.value),
+                    'NE: ' +  '%s' %(NET_ERRORS.value),
                     'O: %s' % OFFSET.value
                 )
+        print '\n完成下载次数%s\n'%DOWNLOADS.value
         sys.stdout.write(msg)
         sys.stdout.flush()
         time.sleep(2)
+    print 'Exiting'  
 
 def sighandler(signum, frame):
     # print s % (1, 91, "\n  !! Signal:"), signum
@@ -551,7 +629,7 @@ def handle_signal():
     signal.signal(signal.SIGTERM, sighandler)
 
 def main(argv):
-    handle_signal()
+    #handle_signal()
     args, xxx = args_handler(argv)
 
     if args.play:
@@ -566,9 +644,9 @@ def main(argv):
         thrs.append(thr)
 
     # massage thread
-    msg_thr = multiprocessing.Process(target=print_msg, args=(args.check,))
-    msg_thr.daemon = True
-    msg_thr.start()
+    #msg_thr = multiprocessing.Process(target=print_msg, args=(args.check,))
+    #msg_thr.daemon = True
+    #msg_thr.start()
 
     for url in xxx:
         reset_statistic_params()
@@ -587,7 +665,7 @@ def main(argv):
                 if not items:
                     not_add += 1
                     if not_add > 5:
-                        print s % (1, 93, '\n[Warning]:'), \
+                        print '\n[Warning]:', \
                             'There is nothing new to download in 5 loops.\n', \
                             'If you want to scan all resources, using --redownload\n'  \
                             'or running the script again to next 5 loops.'
